@@ -12,12 +12,17 @@ All notable changes to this project will be documented in this file. The format 
 - `update.ps1` and `delete.ps1` (both missing from the original connector).
 - Account import/reconciliation (`import.ps1`) from `SYS.DBA_USERS`.
 - Importable `fieldMapping.json` for username, password, tablespaces and profile.
-- Separate `permissions/systemPrivileges` permissiontype for Oracle system privileges (default `CREATE SESSION`), maintained as a fixed list in its `permissions.ps1`/`importPermissions.ps1`.
+- Separate `permissions/systemPrivileges` permissiontype for Oracle system privileges (default `CREATE SESSION`), maintained as a fixed list in its `permissions.ps1`/`import.ps1`.
 - Permission entitlement import per permissiontype: `permissions/oracleRoles/importPermissions.ps1` from `SYS.DBA_ROLE_PRIVS` and `permissions/systemPrivileges/importPermissions.ps1` from `SYS.DBA_SYS_PRIVS`, deduplicated for multitenant (CDB) databases and output in batches of 500 account references.
 - Governance reconciliation resolutions for Delete and Disable (no person context required).
 
 ### Changed
 
+- README: remarks on execution order as dependent systems, extending the updatable fields and a local agent requirement.
+- README: info and warning boxes as GitHub alerts (`> [!WARNING]`), following the V2 template.
+- README: the supported features table distinguishes implemented, implemented with limitations, not implemented (stating whether it is not possible or possible but not built).
+- README: Actions column in the supported features table, a "Common Oracle errors" section and links to the Oracle documentation.
+- README: requirements now list the required Oracle rights per action, and new "Not implemented (possible extensions)", "Password handling" and "Enable and disable behavior" sections document what is (not) possible.
 - README restructured to the current Tools4ever connector layout (supported features, requirements, correlation, field mapping, remarks per topic, database objects).
 - Permission scripts moved from the repository root (`permissions.ps1`, `grant_permission.ps1`, `revoke_permission.ps1`) to `permissions/oracleRoles/`.
 - Retained the `System.Data.OracleClient` provider, because HelloID agent actions run under Windows PowerShell 5.1.
