@@ -1,0 +1,138 @@
+{
+  "Version": "v1",
+  "MappingFields": [
+    {
+      "Name": "PASSWORD",
+      "Description": "[Required] Randomly generated initial Oracle password. Do not send this value by plain-text email.",
+      "Type": "Text",
+      "MappingActions": [
+        {
+          "MapForActions": [
+            "Create"
+          ],
+          "MappingMode": "Complex",
+          "Value": "\"function getRandomCharacter(characters) {\\n    return characters.charAt(Math.floor(Math.random() * characters.length));\\n}\\n\\nfunction shuffle(value) {\\n    let characters = value.split('');\\n    for (let index = characters.length - 1; index > 0; index--) {\\n        const randomIndex = Math.floor(Math.random() * (index + 1));\\n        const temporaryCharacter = characters[index];\\n        characters[index] = characters[randomIndex];\\n        characters[randomIndex] = temporaryCharacter;\\n    }\\n    return characters.join('');\\n}\\n\\nfunction generatePassword() {\\n    const upperCharacters = 'ABCDEFGHJKMNPQRSTUVWXYZ';\\n    const lowerCharacters = 'abcdefghjkmnpqrstuvwxyz';\\n    const numericCharacters = '23456789';\\n    const specialCharacters = '!#$@*?';\\n    const allCharacters = upperCharacters + lowerCharacters + numericCharacters + specialCharacters;\\n    let password = getRandomCharacter(upperCharacters);\\n    password += getRandomCharacter(lowerCharacters);\\n    password += getRandomCharacter(numericCharacters);\\n    password += getRandomCharacter(specialCharacters);\\n    while (password.length < 12) {\\n        password += getRandomCharacter(allCharacters);\\n    }\\n    return shuffle(password);\\n}\\n\\ngeneratePassword();\"",
+          "UsedInNotifications": true,
+          "StoreInAccountData": false
+        }
+      ]
+    },
+    {
+      "Name": "TEMPORARY_TABLESPACE",
+      "Description": "[Required] Temporary Oracle tablespace.",
+      "Type": "Text",
+      "MappingActions": [
+        {
+          "MapForActions": [
+            "Create",
+            "Update"
+          ],
+          "MappingMode": "Fixed",
+          "Value": "\"TEMP\"",
+          "UsedInNotifications": false,
+          "StoreInAccountData": true
+        }
+      ]
+    },
+    {
+      "Name": "USER_ID",
+      "Description": "[Read-only] Oracle-generated user identifier, imported for reconciliation.",
+      "Type": "Text",
+      "MappingActions": [
+        {
+          "MapForActions": [
+            "Create",
+            "Update",
+            "Enable",
+            "Disable",
+            "Delete"
+          ],
+          "MappingMode": "None",
+          "Value": "null",
+          "UsedInNotifications": false,
+          "StoreInAccountData": true
+        }
+      ]
+    },
+    {
+      "Name": "ACCOUNT_STATUS",
+      "Description": "[Read-only] Oracle account status, imported to determine whether the account is enabled.",
+      "Type": "Text",
+      "MappingActions": [
+        {
+          "MapForActions": [
+            "Create",
+            "Update",
+            "Enable",
+            "Disable",
+            "Delete"
+          ],
+          "MappingMode": "None",
+          "Value": "null",
+          "UsedInNotifications": false,
+          "StoreInAccountData": true
+        }
+      ]
+    },
+    {
+      "Name": "PROFILE",
+      "Description": "[Required] Oracle profile.",
+      "Type": "Text",
+      "MappingActions": [
+        {
+          "MapForActions": [
+            "Create",
+            "Update"
+          ],
+          "MappingMode": "Fixed",
+          "Value": "\"DEFAULT\"",
+          "UsedInNotifications": false,
+          "StoreInAccountData": true
+        }
+      ]
+    },
+    {
+      "Name": "DEFAULT_TABLESPACE",
+      "Description": "[Required] Default Oracle tablespace.",
+      "Type": "Text",
+      "MappingActions": [
+        {
+          "MapForActions": [
+            "Create",
+            "Update"
+          ],
+          "MappingMode": "Fixed",
+          "Value": "\"USERS\"",
+          "UsedInNotifications": false,
+          "StoreInAccountData": true
+        }
+      ]
+    },
+    {
+      "Name": "USERNAME",
+      "Description": "[Required] Oracle username. Defaults to the Active Directory sAMAccountName in uppercase; replace MicrosoftActiveDirectory with the system name of the installed Active Directory target system and confirm the username convention during implementation.",
+      "Type": "Text",
+      "MappingActions": [
+        {
+          "MapForActions": [
+            "Create"
+          ],
+          "MappingMode": "Complex",
+          "Value": "\"function getUsername() {\\n    let username = Person.Accounts.MicrosoftActiveDirectory.sAMAccountName.toUpperCase();\\n\\n    return username;\\n}\\n\\ngetUsername();\"",
+          "UsedInNotifications": true,
+          "StoreInAccountData": true
+        },
+        {
+          "MapForActions": [
+            "Update"
+          ],
+          "MappingMode": "None",
+          "Value": "\"\"",
+          "UsedInNotifications": false,
+          "StoreInAccountData": true
+        }
+      ]
+    }
+  ],
+  "UniqueFieldNames": []
+}

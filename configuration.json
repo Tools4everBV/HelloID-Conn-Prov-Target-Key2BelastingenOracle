@@ -1,36 +1,44 @@
 [
-  {
-    "key": "dataSource",
-    "type": "input",
-    "defaultValue": "",
-    "templateOptions": {
-      "label": "Data Source",
-      "placeholder": "",
-      "description": "",
-      "required": true
+    {
+        "key": "DataSource",
+        "type": "input",
+        "defaultValue": "",
+        "templateOptions": {
+            "label": "Data Source",
+            "placeholder": "server:1521/service",
+            "description": "The Oracle connection string data source, format [server]:[port]/[database].",
+            "required": true
+        }
+    },
+    {
+        "key": "Username",
+        "type": "input",
+        "defaultValue": "",
+        "templateOptions": {
+            "label": "Username",
+            "placeholder": "SVC_HelloID",
+            "description": "The username of the Oracle service account used by HelloID. Leave both Username and Password empty to use Oracle integrated security with the Windows account running the HelloID Agent.",
+            "required": false
+        }
+    },
+    {
+        "key": "Password",
+        "type": "input",
+        "defaultValue": "",
+        "templateOptions": {
+            "label": "Password",
+            "type": "password",
+            "description": "The password of the Oracle service account. Leave both Username and Password empty to use Oracle integrated security.",
+            "required": false
+        }
+    },
+    {
+        "key": "DropCascade",
+        "type": "checkbox",
+        "defaultValue": false,
+        "templateOptions": {
+            "label": "Use DROP USER ... CASCADE on delete",
+            "description": "If enabled, delete performs 'DROP USER <username> CASCADE'. If disabled, delete performs a plain 'DROP USER <username>' (fails if the user owns database objects)."
+        }
     }
-  },
-  {
-    "key": "Username",
-    "type": "input",
-    "defaultValue": "",
-    "templateOptions": {
-      "label": "Username",
-      "placeholder": "",
-      "description": "",
-      "required": true
-    }
-  },
-  {
-    "key": "Password",
-    "type": "input",
-    "defaultValue": "",
-    "templateOptions": {
-      "label": "Password",
-      "type": "password",
-      "placeholder": "",
-      "description": "",
-      "required": true
-    }
-  }
 ]

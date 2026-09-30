@@ -1,5 +1,5 @@
 #################################################
-# HelloID-Conn-Prov-Target-Key2BelastingenOracle-Enable
+# HelloID-Conn-Prov-Target-Key2BelastingenOracle-GrantPermission-OracleRoles
 # PowerShell V2
 #################################################
 
@@ -113,86 +113,42 @@ try {
     $actionMessage = 'opening Oracle connection'
     $connection = New-OracleConnection @splatNewOracleConnection
 
-    $outputFields = @($outputContext.Data.PSObject.Properties.Name | Where-Object { $_ })
-    $databaseOutputFields = @($outputFields | Where-Object { $_ -ne 'PASSWORD' })
-    $actionMessage = "querying Oracle user where USERNAME = [$($actionContext.References.Account)]"
-    $queryGetAccount = "
-    SELECT
-        $((@('USERNAME', 'ACCOUNT_STATUS') + $databaseOutputFields | Select-Object -Unique) -join ', ')
-    FROM SYS.DBA_USERS
-    WHERE USERNAME = '$($actionContext.References.Account)'
+    $actionMessage = "granting role: [$($actionContext.References.Permission.Id)] to Oracle user: [$($actionContext.References.Account)]"
+    $queryGrantPermission = "
+    GRANT $($actionContext.References.Permission.Id)
+    TO $($actionContext.References.Account)
     "
-    $splatQueryGetAccount = @{
+    $splatQueryGrantPermission = @{
         Connection = $connection
-        Query      = $queryGetAccount
-        NonQuery   = $false
+        Query      = $queryGrantPermission
+        NonQuery   = $true
     }
-    $correlatedAccount = Invoke-OracleQuery @splatQueryGetAccount
 
-    $actionMessage = 'determining action'
-    if (($correlatedAccount | Measure-Object).Count -eq 1) {
-        $outputContext.PreviousData = ($correlatedAccount | Select-Object -Property $outputFields | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
-        $outputContext.Data = ($correlatedAccount | Select-Object -Property $outputFields | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
-        if ($outputFields -contains 'ACCOUNT_STATUS') { $outputContext.Data.ACCOUNT_STATUS = 'OPEN' }
-
-        if ($correlatedAccount.ACCOUNT_STATUS -like 'LOCKED*' -or $correlatedAccount.ACCOUNT_STATUS -eq 'EXPIRED & LOCKED') {
-            $action = 'EnableAccount'
-        }
-        else {
-            $action = 'NoChanges'
-        }
+    # Ensures all granted roles are enabled automatically at login
+    $querySetDefaultRoles = "
+    ALTER USER $($actionContext.References.Account)
+        DEFAULT ROLE ALL
+    "
+    $splatQuerySetDefaultRoles = @{
+        Connection = $connection
+        Query      = $querySetDefaultRoles
+        NonQuery   = $true
     }
-    elseif (($correlatedAccount | Measure-Object).Count -gt 1) {
-        $action = 'MultipleFound'
+
+    if (-not ($actionContext.DryRun -eq $true)) {
+        [void](Invoke-OracleQuery @splatQueryGrantPermission)
+
+        $actionMessage = "setting default roles for Oracle user: [$($actionContext.References.Account)]"
+        [void](Invoke-OracleQuery @splatQuerySetDefaultRoles)
+
+        $outputContext.AuditLogs.Add([PSCustomObject]@{
+                Action  = 'GrantPermission'
+                Message = "Granted role: [$($actionContext.References.Permission.Id)] to Oracle user: [$($actionContext.References.Account)]"
+                IsError = $false
+            })
     }
     else {
-        $action = 'NotFound'
-    }
-    Write-Information "Determined action: [$action]"
-
-    switch ($action) {
-        'EnableAccount' {
-            $actionMessage = "enabling Oracle user [$($actionContext.References.Account)]"
-            $queryEnableAccount = "
-            ALTER USER $($actionContext.References.Account)
-                ACCOUNT UNLOCK
-            "
-            $splatQueryEnableAccount = @{
-                Connection = $connection
-                Query      = $queryEnableAccount
-                NonQuery   = $true
-            }
-
-            if (-not ($actionContext.DryRun -eq $true)) {
-                [void](Invoke-OracleQuery @splatQueryEnableAccount)
-
-                $outputContext.AuditLogs.Add([PSCustomObject]@{
-                        Action  = 'EnableAccount'
-                        Message = "Enabled Oracle user [$($actionContext.References.Account)]"
-                        IsError = $false
-                    })
-            }
-            else {
-                Write-Information "[DryRun] Would enable Oracle user [$($actionContext.References.Account)]"
-            }
-            break
-        }
-
-        'NoChanges' {
-            $outputContext.AuditLogs.Add([PSCustomObject]@{
-                    Message = "Skipped enabling Oracle user [$($actionContext.References.Account)]. Reason: Already enabled."
-                    IsError = $false
-                })
-            break
-        }
-
-        'MultipleFound' {
-            throw "Multiple Oracle users found with username: [$($actionContext.References.Account)]. Please correct this so the accounts are unique."
-        }
-
-        'NotFound' {
-            throw "No Oracle user found with username: [$($actionContext.References.Account)]."
-        }
+        Write-Information "[DryRun] Would grant role: [$($actionContext.References.Permission.Id)] to Oracle user: [$($actionContext.References.Account)]"
     }
 
     $outputContext.Success = $true

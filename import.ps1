@@ -1,6 +1,11 @@
 #################################################
-# HelloID-Conn-Prov-Target-Key2BelastingenOracle-Enable
+# HelloID-Conn-Prov-Target-Key2BelastingenOracle-Import
 # PowerShell V2
+#
+# FIT FOR PURPOSE (FFP): import of all Oracle users, without filtering
+# All users from SYS.DBA_USERS are imported, including Oracle-maintained and application schemas, as in the implementation
+# this connector was built for. Other implementations may need a WHERE clause (e.g. a username convention or ORACLE_MAINTAINED = 'N').
+# See README.md, section "Fit For Purpose (FFP)".
 #################################################
 
 # Enable TLS1.2
@@ -70,8 +75,8 @@ function Invoke-OracleQuery {
         Write-Output $command.ExecuteNonQuery()
     }
     else {
-        $adapter = New-Object System.Data.OracleClient.OracleDataAdapter($command)
-        $dataSet = New-Object System.Data.DataSet
+        $adapter = [System.Data.OracleClient.OracleDataAdapter]::new($command)
+        $dataSet = [System.Data.DataSet]::new()
         [void]$adapter.Fill($dataSet)
         Write-Output ($dataSet.Tables[0] | Select-Object -Property * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors)
     }
@@ -100,10 +105,8 @@ function Resolve-OracleError {
 #endregion functions
 
 try {
-    $actionMessage = 'verifying account reference'
-    if ([string]::IsNullOrEmpty($($actionContext.References.Account))) {
-        throw 'The account reference could not be found'
-    }
+    Write-Information 'Starting import of Oracle users'
+
     $connectionString = "Data Source=$($actionContext.Configuration.DataSource)"
     $splatNewOracleConnection = @{
         ConnectionString = $connectionString
@@ -113,92 +116,48 @@ try {
     $actionMessage = 'opening Oracle connection'
     $connection = New-OracleConnection @splatNewOracleConnection
 
-    $outputFields = @($outputContext.Data.PSObject.Properties.Name | Where-Object { $_ })
-    $databaseOutputFields = @($outputFields | Where-Object { $_ -ne 'PASSWORD' })
-    $actionMessage = "querying Oracle user where USERNAME = [$($actionContext.References.Account)]"
-    $queryGetAccount = "
+    $importFields = @($actionContext.ImportFields | Where-Object { $_ -ne 'PASSWORD' })
+    $actionMessage = 'querying Oracle users'
+    # FIT FOR PURPOSE (FFP): no filter; add a WHERE clause here when only Key2 Belastingen users must be imported.
+    $queryImportAccounts = "
     SELECT
-        $((@('USERNAME', 'ACCOUNT_STATUS') + $databaseOutputFields | Select-Object -Unique) -join ', ')
-    FROM SYS.DBA_USERS
-    WHERE USERNAME = '$($actionContext.References.Account)'
+        $($importFields -join ',')
+    FROM
+        SYS.DBA_USERS
+    ORDER BY
+        USERNAME
     "
-    $splatQueryGetAccount = @{
+    $splatQueryImportAccounts = @{
         Connection = $connection
-        Query      = $queryGetAccount
+        Query      = $queryImportAccounts
         NonQuery   = $false
     }
-    $correlatedAccount = Invoke-OracleQuery @splatQueryGetAccount
+    $importedAccounts = Invoke-OracleQuery @splatQueryImportAccounts
+    Write-Information "Queried Oracle users. Result count: $(($importedAccounts | Measure-Object).Count)"
 
-    $actionMessage = 'determining action'
-    if (($correlatedAccount | Measure-Object).Count -eq 1) {
-        $outputContext.PreviousData = ($correlatedAccount | Select-Object -Property $outputFields | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
-        $outputContext.Data = ($correlatedAccount | Select-Object -Property $outputFields | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
-        if ($outputFields -contains 'ACCOUNT_STATUS') { $outputContext.Data.ACCOUNT_STATUS = 'OPEN' }
+    $actionMessage = 'processing imported Oracle users and outputting account entitlements to HelloID'
+    $importedAccountsCount = 0
+    foreach ($importedAccount in $importedAccounts) {
+        $actionMessage = "processing Oracle user [$($importedAccount.USERNAME)]"
 
-        if ($correlatedAccount.ACCOUNT_STATUS -like 'LOCKED*' -or $correlatedAccount.ACCOUNT_STATUS -eq 'EXPIRED & LOCKED') {
-            $action = 'EnableAccount'
-        }
-        else {
-            $action = 'NoChanges'
-        }
-    }
-    elseif (($correlatedAccount | Measure-Object).Count -gt 1) {
-        $action = 'MultipleFound'
-    }
-    else {
-        $action = 'NotFound'
-    }
-    Write-Information "Determined action: [$action]"
-
-    switch ($action) {
-        'EnableAccount' {
-            $actionMessage = "enabling Oracle user [$($actionContext.References.Account)]"
-            $queryEnableAccount = "
-            ALTER USER $($actionContext.References.Account)
-                ACCOUNT UNLOCK
-            "
-            $splatQueryEnableAccount = @{
-                Connection = $connection
-                Query      = $queryEnableAccount
-                NonQuery   = $true
-            }
-
-            if (-not ($actionContext.DryRun -eq $true)) {
-                [void](Invoke-OracleQuery @splatQueryEnableAccount)
-
-                $outputContext.AuditLogs.Add([PSCustomObject]@{
-                        Action  = 'EnableAccount'
-                        Message = "Enabled Oracle user [$($actionContext.References.Account)]"
-                        IsError = $false
-                    })
-            }
-            else {
-                Write-Information "[DryRun] Would enable Oracle user [$($actionContext.References.Account)]"
-            }
-            break
+        $data = @{}
+        foreach ($field in $actionContext.ImportFields) {
+            $data[$field] = $importedAccount.$field
         }
 
-        'NoChanges' {
-            $outputContext.AuditLogs.Add([PSCustomObject]@{
-                    Message = "Skipped enabling Oracle user [$($actionContext.References.Account)]. Reason: Already enabled."
-                    IsError = $false
-                })
-            break
+        Write-Output @{
+            AccountReference = "$($importedAccount.USERNAME)"
+            DisplayName      = "$($importedAccount.USERNAME)"
+            UserName         = "$($importedAccount.USERNAME)"
+            Enabled          = ($importedAccount.ACCOUNT_STATUS -eq 'OPEN')
+            Data             = $data
         }
-
-        'MultipleFound' {
-            throw "Multiple Oracle users found with username: [$($actionContext.References.Account)]. Please correct this so the accounts are unique."
-        }
-
-        'NotFound' {
-            throw "No Oracle user found with username: [$($actionContext.References.Account)]."
-        }
+        $importedAccountsCount++
     }
 
-    $outputContext.Success = $true
+    Write-Information "Completed import of Oracle users. Result count: $($importedAccountsCount)"
 }
 catch {
-    $outputContext.Success = $false
     $ex = $PSItem
     if ($ex.Exception.GetBaseException().GetType().FullName -eq 'System.Data.OracleClient.OracleException') {
         $errorObj = Resolve-OracleError -ErrorObject $ex
@@ -210,11 +169,7 @@ catch {
         $errorMessage = "Error $($actionMessage). Error: $($ex.Exception.Message)"
     }
     Write-Warning $warningMessage
-
-    $outputContext.AuditLogs.Add([PSCustomObject]@{
-            Message = $errorMessage
-            IsError = $true
-        })
+    Write-Error $errorMessage
 }
 finally {
     if ($connection -and $connection.State -eq 'Open') {
