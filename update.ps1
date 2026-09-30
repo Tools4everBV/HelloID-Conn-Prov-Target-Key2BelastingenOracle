@@ -1,5 +1,5 @@
-﻿#################################################
-# HelloID-Conn-Prov-Target-Key2BelastingenOracle-Disable
+#################################################
+# HelloID-Conn-Prov-Target-Key2BelastingenOracle-Update
 # PowerShell V2
 #
 # FIT FOR PURPOSE (FFP)
@@ -119,17 +119,15 @@ try {
     $connection = New-OracleConnection @splatNewOracleConnection
 
     $outputFields = @($outputContext.Data.PSObject.Properties.Name | Where-Object { $_ })
-    # Governance reconciliation resolutions run without person context, so no field mapping is available.
-    # Disable has no mapped values (ACCOUNT LOCK); only the output fields need a default.
-    if ($actionContext.ReconciliationOrigin -eq 'reconciliation' -and ($outputFields | Measure-Object).Count -eq 0) {
-        $outputFields = @('USERNAME', 'ACCOUNT_STATUS')
-        Write-Information "Reconciliation mode: disable (output fields: $($outputFields -join ', '))"
-    }
     $databaseOutputFields = @($outputFields | Where-Object { $_ -ne 'PASSWORD' })
+    $updatableFields = @('DEFAULT_TABLESPACE', 'TEMPORARY_TABLESPACE', 'PROFILE') | Where-Object {
+        $actionContext.Data.PSObject.Properties.Name -contains $_ -and -not [string]::IsNullOrEmpty([string]$actionContext.Data.$_)
+    }
+
     $actionMessage = "querying Oracle user where USERNAME = [$($actionContext.References.Account)]"
     $queryGetAccount = "
     SELECT
-        $((@('USERNAME', 'ACCOUNT_STATUS') + $databaseOutputFields | Select-Object -Unique) -join ', ')
+        $((@('USERNAME') + $databaseOutputFields | Select-Object -Unique) -join ', ')
     FROM SYS.DBA_USERS
     WHERE USERNAME = '$($actionContext.References.Account)'
     "
@@ -144,10 +142,29 @@ try {
     if (($correlatedAccount | Measure-Object).Count -eq 1) {
         $outputContext.PreviousData = ($correlatedAccount | Select-Object -Property $outputFields | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
         $outputContext.Data = ($correlatedAccount | Select-Object -Property $outputFields | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
-        if ($outputFields -contains 'ACCOUNT_STATUS') { $outputContext.Data.ACCOUNT_STATUS = 'LOCKED' }
 
-        if ($correlatedAccount.ACCOUNT_STATUS -eq 'OPEN') {
-            $action = 'DisableAccount'
+        $desiredProperties = foreach ($fieldName in $updatableFields) {
+            [PSCustomObject]@{
+                Name  = $fieldName
+                Value = ([string]$actionContext.Data.$fieldName).ToUpper()
+            }
+            $outputContext.Data.$fieldName = $actionContext.Data.$fieldName
+        }
+        $currentProperties = foreach ($fieldName in $updatableFields) {
+            [PSCustomObject]@{
+                Name  = $fieldName
+                Value = ([string]$correlatedAccount.$fieldName).ToUpper()
+            }
+        }
+
+        # Without update-mapped fields there is nothing to compare; Compare-Object does not accept empty input
+        $propertiesChanged = @()
+        if (($updatableFields | Measure-Object).Count -gt 0) {
+            $propertiesChanged = @(Compare-Object -ReferenceObject $currentProperties -DifferenceObject $desiredProperties -Property Name, Value -PassThru | Where-Object SideIndicator -eq '=>' | Select-Object -ExpandProperty Name)
+        }
+
+        if (($propertiesChanged | Measure-Object).Count -gt 0) {
+            $action = 'UpdateAccount'
         }
         else {
             $action = 'NoChanges'
@@ -162,36 +179,42 @@ try {
     Write-Information "Determined action: [$action]"
 
     switch ($action) {
-        'DisableAccount' {
-            $actionMessage = "disabling Oracle user [$($actionContext.References.Account)]"
-            $queryDisableAccount = "
+        'UpdateAccount' {
+            $actionMessage = "updating Oracle user [$($actionContext.References.Account)]. Properties changed: [$($propertiesChanged -join ', ')]"
+
+            $alterClauses = [System.Collections.Generic.List[string]]::new()
+            if ($propertiesChanged -contains 'DEFAULT_TABLESPACE') { $alterClauses.Add("DEFAULT TABLESPACE $($actionContext.Data.DEFAULT_TABLESPACE)") }
+            if ($propertiesChanged -contains 'TEMPORARY_TABLESPACE') { $alterClauses.Add("TEMPORARY TABLESPACE $($actionContext.Data.TEMPORARY_TABLESPACE)") }
+            if ($propertiesChanged -contains 'PROFILE') { $alterClauses.Add("PROFILE $($actionContext.Data.PROFILE)") }
+
+            $queryUpdateAccount = "
             ALTER USER $($actionContext.References.Account)
-                ACCOUNT LOCK
+                $($alterClauses -join "`r`n                ")
             "
-            $splatQueryDisableAccount = @{
+            $splatQueryUpdateAccount = @{
                 Connection = $connection
-                Query      = $queryDisableAccount
+                Query      = $queryUpdateAccount
                 NonQuery   = $true
             }
 
             if (-not ($actionContext.DryRun -eq $true)) {
-                [void](Invoke-OracleQuery @splatQueryDisableAccount)
+                [void](Invoke-OracleQuery @splatQueryUpdateAccount)
 
                 $outputContext.AuditLogs.Add([PSCustomObject]@{
-                        Action  = 'DisableAccount'
-                        Message = "Disabled Oracle user [$($actionContext.References.Account)]"
+                        Action  = 'UpdateAccount'
+                        Message = "Updated Oracle user [$($actionContext.References.Account)]. Properties changed: [$($propertiesChanged -join ', ')]"
                         IsError = $false
                     })
             }
             else {
-                Write-Information "[DryRun] Would disable Oracle user [$($actionContext.References.Account)]"
+                Write-Information "[DryRun] Would update Oracle user [$($actionContext.References.Account)]. Properties changed: [$($propertiesChanged -join ', ')]"
             }
             break
         }
 
         'NoChanges' {
             $outputContext.AuditLogs.Add([PSCustomObject]@{
-                    Message = "Skipped disabling Oracle user [$($actionContext.References.Account)]. Reason: Already disabled."
+                    Message = "Skipped updating Oracle user [$($actionContext.References.Account)]. Reason: No changes."
                     IsError = $false
                 })
             break

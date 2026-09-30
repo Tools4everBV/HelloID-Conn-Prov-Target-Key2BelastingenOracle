@@ -1,5 +1,5 @@
-﻿#################################################
-# HelloID-Conn-Prov-Target-Key2BelastingenOracle-Disable
+#################################################
+# HelloID-Conn-Prov-Target-Key2BelastingenOracle-Permissions-OracleRoles
 # PowerShell V2
 #
 # FIT FOR PURPOSE (FFP)
@@ -75,8 +75,8 @@ function Invoke-OracleQuery {
         Write-Output $command.ExecuteNonQuery()
     }
     else {
-        $adapter = New-Object System.Data.OracleClient.OracleDataAdapter($command)
-        $dataSet = New-Object System.Data.DataSet
+        $adapter = [System.Data.OracleClient.OracleDataAdapter]::new($command)
+        $dataSet = [System.Data.DataSet]::new()
         [void]$adapter.Fill($dataSet)
         Write-Output ($dataSet.Tables[0] | Select-Object -Property * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors)
     }
@@ -105,10 +105,8 @@ function Resolve-OracleError {
 #endregion functions
 
 try {
-    $actionMessage = 'verifying account reference'
-    if ([string]::IsNullOrEmpty($($actionContext.References.Account))) {
-        throw 'The account reference could not be found'
-    }
+    Write-Information 'Starting import of Oracle role permissions'
+
     $connectionString = "Data Source=$($actionContext.Configuration.DataSource)"
     $splatNewOracleConnection = @{
         ConnectionString = $connectionString
@@ -118,98 +116,37 @@ try {
     $actionMessage = 'opening Oracle connection'
     $connection = New-OracleConnection @splatNewOracleConnection
 
-    $outputFields = @($outputContext.Data.PSObject.Properties.Name | Where-Object { $_ })
-    # Governance reconciliation resolutions run without person context, so no field mapping is available.
-    # Disable has no mapped values (ACCOUNT LOCK); only the output fields need a default.
-    if ($actionContext.ReconciliationOrigin -eq 'reconciliation' -and ($outputFields | Measure-Object).Count -eq 0) {
-        $outputFields = @('USERNAME', 'ACCOUNT_STATUS')
-        Write-Information "Reconciliation mode: disable (output fields: $($outputFields -join ', '))"
-    }
-    $databaseOutputFields = @($outputFields | Where-Object { $_ -ne 'PASSWORD' })
-    $actionMessage = "querying Oracle user where USERNAME = [$($actionContext.References.Account)]"
-    $queryGetAccount = "
+    $actionMessage = 'querying Oracle roles'
+    $queryGetPermissions = "
     SELECT
-        $((@('USERNAME', 'ACCOUNT_STATUS') + $databaseOutputFields | Select-Object -Unique) -join ', ')
-    FROM SYS.DBA_USERS
-    WHERE USERNAME = '$($actionContext.References.Account)'
+        ROLE AS ID
+    FROM SYS.DBA_ROLES
+    ORDER BY ID
     "
-    $splatQueryGetAccount = @{
+    $splatQueryGetPermissions = @{
         Connection = $connection
-        Query      = $queryGetAccount
+        Query      = $queryGetPermissions
         NonQuery   = $false
     }
-    $correlatedAccount = Invoke-OracleQuery @splatQueryGetAccount
+    $roles = Invoke-OracleQuery @splatQueryGetPermissions
+    Write-Information "Queried Oracle roles. Result count: $(($roles | Measure-Object).Count)"
 
-    $actionMessage = 'determining action'
-    if (($correlatedAccount | Measure-Object).Count -eq 1) {
-        $outputContext.PreviousData = ($correlatedAccount | Select-Object -Property $outputFields | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
-        $outputContext.Data = ($correlatedAccount | Select-Object -Property $outputFields | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
-        if ($outputFields -contains 'ACCOUNT_STATUS') { $outputContext.Data.ACCOUNT_STATUS = 'LOCKED' }
-
-        if ($correlatedAccount.ACCOUNT_STATUS -eq 'OPEN') {
-            $action = 'DisableAccount'
-        }
-        else {
-            $action = 'NoChanges'
-        }
-    }
-    elseif (($correlatedAccount | Measure-Object).Count -gt 1) {
-        $action = 'MultipleFound'
-    }
-    else {
-        $action = 'NotFound'
-    }
-    Write-Information "Determined action: [$action]"
-
-    switch ($action) {
-        'DisableAccount' {
-            $actionMessage = "disabling Oracle user [$($actionContext.References.Account)]"
-            $queryDisableAccount = "
-            ALTER USER $($actionContext.References.Account)
-                ACCOUNT LOCK
-            "
-            $splatQueryDisableAccount = @{
-                Connection = $connection
-                Query      = $queryDisableAccount
-                NonQuery   = $true
+    $importedPermissions = 0
+    foreach ($role in $roles) {
+        $outputContext.Permissions.Add(
+            @{
+                DisplayName    = "$($role.ID)"
+                Identification = @{
+                    Id = "$($role.ID)"
+                }
             }
-
-            if (-not ($actionContext.DryRun -eq $true)) {
-                [void](Invoke-OracleQuery @splatQueryDisableAccount)
-
-                $outputContext.AuditLogs.Add([PSCustomObject]@{
-                        Action  = 'DisableAccount'
-                        Message = "Disabled Oracle user [$($actionContext.References.Account)]"
-                        IsError = $false
-                    })
-            }
-            else {
-                Write-Information "[DryRun] Would disable Oracle user [$($actionContext.References.Account)]"
-            }
-            break
-        }
-
-        'NoChanges' {
-            $outputContext.AuditLogs.Add([PSCustomObject]@{
-                    Message = "Skipped disabling Oracle user [$($actionContext.References.Account)]. Reason: Already disabled."
-                    IsError = $false
-                })
-            break
-        }
-
-        'MultipleFound' {
-            throw "Multiple Oracle users found with username: [$($actionContext.References.Account)]. Please correct this so the accounts are unique."
-        }
-
-        'NotFound' {
-            throw "No Oracle user found with username: [$($actionContext.References.Account)]."
-        }
+        )
+        $importedPermissions++
     }
 
-    $outputContext.Success = $true
+    Write-Information "Completed import of Oracle role permissions. Result count: $($importedPermissions)"
 }
 catch {
-    $outputContext.Success = $false
     $ex = $PSItem
     if ($ex.Exception.GetBaseException().GetType().FullName -eq 'System.Data.OracleClient.OracleException') {
         $errorObj = Resolve-OracleError -ErrorObject $ex
@@ -221,11 +158,7 @@ catch {
         $errorMessage = "Error $($actionMessage). Error: $($ex.Exception.Message)"
     }
     Write-Warning $warningMessage
-
-    $outputContext.AuditLogs.Add([PSCustomObject]@{
-            Message = $errorMessage
-            IsError = $true
-        })
+    Write-Error $errorMessage
 }
 finally {
     if ($connection -and $connection.State -eq 'Open') {

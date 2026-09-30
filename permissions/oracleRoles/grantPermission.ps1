@@ -1,5 +1,5 @@
-﻿#################################################
-# HelloID-Conn-Prov-Target-Key2BelastingenOracle-Disable
+#################################################
+# HelloID-Conn-Prov-Target-Key2BelastingenOracle-GrantPermission-OracleRoles
 # PowerShell V2
 #
 # FIT FOR PURPOSE (FFP)
@@ -118,92 +118,42 @@ try {
     $actionMessage = 'opening Oracle connection'
     $connection = New-OracleConnection @splatNewOracleConnection
 
-    $outputFields = @($outputContext.Data.PSObject.Properties.Name | Where-Object { $_ })
-    # Governance reconciliation resolutions run without person context, so no field mapping is available.
-    # Disable has no mapped values (ACCOUNT LOCK); only the output fields need a default.
-    if ($actionContext.ReconciliationOrigin -eq 'reconciliation' -and ($outputFields | Measure-Object).Count -eq 0) {
-        $outputFields = @('USERNAME', 'ACCOUNT_STATUS')
-        Write-Information "Reconciliation mode: disable (output fields: $($outputFields -join ', '))"
-    }
-    $databaseOutputFields = @($outputFields | Where-Object { $_ -ne 'PASSWORD' })
-    $actionMessage = "querying Oracle user where USERNAME = [$($actionContext.References.Account)]"
-    $queryGetAccount = "
-    SELECT
-        $((@('USERNAME', 'ACCOUNT_STATUS') + $databaseOutputFields | Select-Object -Unique) -join ', ')
-    FROM SYS.DBA_USERS
-    WHERE USERNAME = '$($actionContext.References.Account)'
+    $actionMessage = "granting role: [$($actionContext.References.Permission.Id)] to Oracle user: [$($actionContext.References.Account)]"
+    $queryGrantPermission = "
+    GRANT $($actionContext.References.Permission.Id)
+    TO $($actionContext.References.Account)
     "
-    $splatQueryGetAccount = @{
+    $splatQueryGrantPermission = @{
         Connection = $connection
-        Query      = $queryGetAccount
-        NonQuery   = $false
+        Query      = $queryGrantPermission
+        NonQuery   = $true
     }
-    $correlatedAccount = Invoke-OracleQuery @splatQueryGetAccount
 
-    $actionMessage = 'determining action'
-    if (($correlatedAccount | Measure-Object).Count -eq 1) {
-        $outputContext.PreviousData = ($correlatedAccount | Select-Object -Property $outputFields | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
-        $outputContext.Data = ($correlatedAccount | Select-Object -Property $outputFields | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
-        if ($outputFields -contains 'ACCOUNT_STATUS') { $outputContext.Data.ACCOUNT_STATUS = 'LOCKED' }
-
-        if ($correlatedAccount.ACCOUNT_STATUS -eq 'OPEN') {
-            $action = 'DisableAccount'
-        }
-        else {
-            $action = 'NoChanges'
-        }
+    # Ensures all granted roles are enabled automatically at login
+    $querySetDefaultRoles = "
+    ALTER USER $($actionContext.References.Account)
+        DEFAULT ROLE ALL
+    "
+    $splatQuerySetDefaultRoles = @{
+        Connection = $connection
+        Query      = $querySetDefaultRoles
+        NonQuery   = $true
     }
-    elseif (($correlatedAccount | Measure-Object).Count -gt 1) {
-        $action = 'MultipleFound'
+
+    if (-not ($actionContext.DryRun -eq $true)) {
+        [void](Invoke-OracleQuery @splatQueryGrantPermission)
+
+        $actionMessage = "setting default roles for Oracle user: [$($actionContext.References.Account)]"
+        [void](Invoke-OracleQuery @splatQuerySetDefaultRoles)
+
+        $outputContext.AuditLogs.Add([PSCustomObject]@{
+                Action  = 'GrantPermission'
+                Message = "Granted role: [$($actionContext.References.Permission.Id)] to Oracle user: [$($actionContext.References.Account)]"
+                IsError = $false
+            })
     }
     else {
-        $action = 'NotFound'
-    }
-    Write-Information "Determined action: [$action]"
-
-    switch ($action) {
-        'DisableAccount' {
-            $actionMessage = "disabling Oracle user [$($actionContext.References.Account)]"
-            $queryDisableAccount = "
-            ALTER USER $($actionContext.References.Account)
-                ACCOUNT LOCK
-            "
-            $splatQueryDisableAccount = @{
-                Connection = $connection
-                Query      = $queryDisableAccount
-                NonQuery   = $true
-            }
-
-            if (-not ($actionContext.DryRun -eq $true)) {
-                [void](Invoke-OracleQuery @splatQueryDisableAccount)
-
-                $outputContext.AuditLogs.Add([PSCustomObject]@{
-                        Action  = 'DisableAccount'
-                        Message = "Disabled Oracle user [$($actionContext.References.Account)]"
-                        IsError = $false
-                    })
-            }
-            else {
-                Write-Information "[DryRun] Would disable Oracle user [$($actionContext.References.Account)]"
-            }
-            break
-        }
-
-        'NoChanges' {
-            $outputContext.AuditLogs.Add([PSCustomObject]@{
-                    Message = "Skipped disabling Oracle user [$($actionContext.References.Account)]. Reason: Already disabled."
-                    IsError = $false
-                })
-            break
-        }
-
-        'MultipleFound' {
-            throw "Multiple Oracle users found with username: [$($actionContext.References.Account)]. Please correct this so the accounts are unique."
-        }
-
-        'NotFound' {
-            throw "No Oracle user found with username: [$($actionContext.References.Account)]."
-        }
+        Write-Information "[DryRun] Would grant role: [$($actionContext.References.Permission.Id)] to Oracle user: [$($actionContext.References.Account)]"
     }
 
     $outputContext.Success = $true

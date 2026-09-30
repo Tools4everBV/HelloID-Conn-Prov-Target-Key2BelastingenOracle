@@ -1,5 +1,5 @@
-﻿#################################################
-# HelloID-Conn-Prov-Target-Key2BelastingenOracle-Disable
+#################################################
+# HelloID-Conn-Prov-Target-Key2BelastingenOracle-RevokePermission-SystemPrivileges
 # PowerShell V2
 #
 # FIT FOR PURPOSE (FFP)
@@ -118,114 +118,61 @@ try {
     $actionMessage = 'opening Oracle connection'
     $connection = New-OracleConnection @splatNewOracleConnection
 
-    $outputFields = @($outputContext.Data.PSObject.Properties.Name | Where-Object { $_ })
-    # Governance reconciliation resolutions run without person context, so no field mapping is available.
-    # Disable has no mapped values (ACCOUNT LOCK); only the output fields need a default.
-    if ($actionContext.ReconciliationOrigin -eq 'reconciliation' -and ($outputFields | Measure-Object).Count -eq 0) {
-        $outputFields = @('USERNAME', 'ACCOUNT_STATUS')
-        Write-Information "Reconciliation mode: disable (output fields: $($outputFields -join ', '))"
-    }
-    $databaseOutputFields = @($outputFields | Where-Object { $_ -ne 'PASSWORD' })
-    $actionMessage = "querying Oracle user where USERNAME = [$($actionContext.References.Account)]"
-    $queryGetAccount = "
-    SELECT
-        $((@('USERNAME', 'ACCOUNT_STATUS') + $databaseOutputFields | Select-Object -Unique) -join ', ')
-    FROM SYS.DBA_USERS
-    WHERE USERNAME = '$($actionContext.References.Account)'
+    $actionMessage = "revoking system privilege: [$($actionContext.References.Permission.Id)] from Oracle user: [$($actionContext.References.Account)]"
+    $queryRevokePermission = "
+    REVOKE $($actionContext.References.Permission.Id)
+    FROM $($actionContext.References.Account)
     "
-    $splatQueryGetAccount = @{
+    $splatQueryRevokePermission = @{
         Connection = $connection
-        Query      = $queryGetAccount
-        NonQuery   = $false
+        Query      = $queryRevokePermission
+        NonQuery   = $true
     }
-    $correlatedAccount = Invoke-OracleQuery @splatQueryGetAccount
 
-    $actionMessage = 'determining action'
-    if (($correlatedAccount | Measure-Object).Count -eq 1) {
-        $outputContext.PreviousData = ($correlatedAccount | Select-Object -Property $outputFields | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
-        $outputContext.Data = ($correlatedAccount | Select-Object -Property $outputFields | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
-        if ($outputFields -contains 'ACCOUNT_STATUS') { $outputContext.Data.ACCOUNT_STATUS = 'LOCKED' }
+    if (-not ($actionContext.DryRun -eq $true)) {
+        [void](Invoke-OracleQuery @splatQueryRevokePermission)
 
-        if ($correlatedAccount.ACCOUNT_STATUS -eq 'OPEN') {
-            $action = 'DisableAccount'
-        }
-        else {
-            $action = 'NoChanges'
-        }
-    }
-    elseif (($correlatedAccount | Measure-Object).Count -gt 1) {
-        $action = 'MultipleFound'
+        $outputContext.AuditLogs.Add([PSCustomObject]@{
+                Action  = 'RevokePermission'
+                Message = "Revoked system privilege: [$($actionContext.References.Permission.Id)] from Oracle user: [$($actionContext.References.Account)]"
+                IsError = $false
+            })
     }
     else {
-        $action = 'NotFound'
-    }
-    Write-Information "Determined action: [$action]"
-
-    switch ($action) {
-        'DisableAccount' {
-            $actionMessage = "disabling Oracle user [$($actionContext.References.Account)]"
-            $queryDisableAccount = "
-            ALTER USER $($actionContext.References.Account)
-                ACCOUNT LOCK
-            "
-            $splatQueryDisableAccount = @{
-                Connection = $connection
-                Query      = $queryDisableAccount
-                NonQuery   = $true
-            }
-
-            if (-not ($actionContext.DryRun -eq $true)) {
-                [void](Invoke-OracleQuery @splatQueryDisableAccount)
-
-                $outputContext.AuditLogs.Add([PSCustomObject]@{
-                        Action  = 'DisableAccount'
-                        Message = "Disabled Oracle user [$($actionContext.References.Account)]"
-                        IsError = $false
-                    })
-            }
-            else {
-                Write-Information "[DryRun] Would disable Oracle user [$($actionContext.References.Account)]"
-            }
-            break
-        }
-
-        'NoChanges' {
-            $outputContext.AuditLogs.Add([PSCustomObject]@{
-                    Message = "Skipped disabling Oracle user [$($actionContext.References.Account)]. Reason: Already disabled."
-                    IsError = $false
-                })
-            break
-        }
-
-        'MultipleFound' {
-            throw "Multiple Oracle users found with username: [$($actionContext.References.Account)]. Please correct this so the accounts are unique."
-        }
-
-        'NotFound' {
-            throw "No Oracle user found with username: [$($actionContext.References.Account)]."
-        }
+        Write-Information "[DryRun] Would revoke system privilege: [$($actionContext.References.Permission.Id)] from Oracle user: [$($actionContext.References.Account)]"
     }
 
     $outputContext.Success = $true
 }
 catch {
-    $outputContext.Success = $false
     $ex = $PSItem
-    if ($ex.Exception.GetBaseException().GetType().FullName -eq 'System.Data.OracleClient.OracleException') {
-        $errorObj = Resolve-OracleError -ErrorObject $ex
-        $warningMessage = "Error at Line '$($errorObj.ScriptLineNumber)': $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
-        $errorMessage = "Error $($actionMessage). Error: $($errorObj.FriendlyMessage)"
+    # ORA-01952: system privilege not granted, ORA-01918: user does not exist
+    if ($ex.Exception.Message -match 'ORA-(01952|01918)') {
+        $outputContext.Success = $true
+        $outputContext.AuditLogs.Add([PSCustomObject]@{
+                Action  = 'RevokePermission'
+                Message = "Skipped revoking system privilege: [$($actionContext.References.Permission.Id)] from Oracle user: [$($actionContext.References.Account)]. Reason: System privilege not granted or user no longer exists ($($Matches[0]))."
+                IsError = $false
+            })
     }
     else {
-        $warningMessage = "Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
-        $errorMessage = "Error $($actionMessage). Error: $($ex.Exception.Message)"
-    }
-    Write-Warning $warningMessage
+        $outputContext.Success = $false
+        if ($ex.Exception.GetBaseException().GetType().FullName -eq 'System.Data.OracleClient.OracleException') {
+            $errorObj = Resolve-OracleError -ErrorObject $ex
+            $warningMessage = "Error at Line '$($errorObj.ScriptLineNumber)': $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
+            $errorMessage = "Error $($actionMessage). Error: $($errorObj.FriendlyMessage)"
+        }
+        else {
+            $warningMessage = "Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
+            $errorMessage = "Error $($actionMessage). Error: $($ex.Exception.Message)"
+        }
+        Write-Warning $warningMessage
 
-    $outputContext.AuditLogs.Add([PSCustomObject]@{
-            Message = $errorMessage
-            IsError = $true
-        })
+        $outputContext.AuditLogs.Add([PSCustomObject]@{
+                Message = $errorMessage
+                IsError = $true
+            })
+    }
 }
 finally {
     if ($connection -and $connection.State -eq 'Open') {
