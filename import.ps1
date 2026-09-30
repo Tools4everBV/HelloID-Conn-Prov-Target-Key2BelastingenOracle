@@ -2,10 +2,10 @@
 # HelloID-Conn-Prov-Target-Key2BelastingenOracle-Import
 # PowerShell V2
 #
-# FIT FOR PURPOSE (FFP)
-# This connector is Fit For Purpose: it was built for the specific requirements of one implementation.
-# It is not a fully generic connector and may not fit the next implementation without changes.
-# Review this script against the requirements of each implementation. See README.md, section "Fit For Purpose (FFP)".
+# FIT FOR PURPOSE (FFP): import of all Oracle users, without filtering
+# All users from SYS.DBA_USERS are imported, including Oracle-maintained and application schemas, as in the implementation
+# this connector was built for. Other implementations may need a WHERE clause (e.g. a username convention or ORACLE_MAINTAINED = 'N').
+# See README.md, section "Fit For Purpose (FFP)".
 #################################################
 
 # Enable TLS1.2
@@ -118,6 +118,7 @@ try {
 
     $importFields = @($actionContext.ImportFields | Where-Object { $_ -ne 'PASSWORD' })
     $actionMessage = 'querying Oracle users'
+    # FIT FOR PURPOSE (FFP): no filter; add a WHERE clause here when only Key2 Belastingen users must be imported.
     $queryImportAccounts = "
     SELECT
         $($importFields -join ',')

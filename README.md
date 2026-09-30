@@ -6,7 +6,7 @@
 
 | :warning: Fit For Purpose (FFP) |
 |:---|
-| This connector is **Fit For Purpose (FFP)**: it was built for the specific requirements of one implementation and is **not** a fully generic connector. It is not certain that it fits the next implementation without changes. Before implementing it, review the scripts, field mapping and configuration against the requirements of the customer, and read [Fit For Purpose (FFP)](#fit-for-purpose-ffp) for the parts that are known to be implementation-specific. |
+| This connector contains **Fit For Purpose (FFP)** parts: parts that were built for the specific requirements of one implementation, of which it is not certain that they are generic or fit the next implementation. Examples are the delete, which first revokes all remaining roles and system privileges before `DROP USER`, and the account import without filtering. These parts are marked with `FIT FOR PURPOSE (FFP)` in the scripts concerned and listed in [Fit For Purpose (FFP)](#fit-for-purpose-ffp). Review them against the requirements of the customer before implementing this connector. |
 
 <p align="center">
   <img src="https://www.tools4ever.nl/connector-logos/centric-logo.png" width="500">
@@ -144,18 +144,15 @@ Roles and system privileges are separate permissiontypes, each with its own `per
 
 ### Fit For Purpose (FFP)
 
-Fit For Purpose (FFP) means that the connector was built for the specific requirements and wishes of one customer/implementation, and is not necessarily suitable for the next customer/implementation. Every script contains a `FIT FOR PURPOSE (FFP)` block in its header as a reminder.
+Fit For Purpose (FFP) means that a part was built for the specific requirements and wishes of one customer/implementation, and is not necessarily suitable for the next customer/implementation. The scripts concerned contain a `FIT FOR PURPOSE (FFP)` note in their header and at the code itself.
 
-The following parts are known to be implementation-specific and must be reviewed per implementation:
+The following parts are FFP and must be reviewed per implementation:
 
-| Part | Review |
-| ---- | ------ |
-| Username convention | The supplied mapping uses the uppercase Active Directory `sAMAccountName`. Confirm the convention with the customer. See [Field mapping](#field-mapping). |
-| Tablespaces and profile | `USERS`, `TEMP` and `DEFAULT` are defaults. Confirm the values with the database administrator. |
-| Managed system privileges | Fixed list, default `CREATE SESSION`. See [Permissions](#permissions). |
-| Delete | Revokes **all** roles and system privileges (including grants made outside HelloID) and drops the user, optionally with `CASCADE`. Confirm with the database administrator that this is desired. See [Delete behavior](#delete-behavior). |
-| Account import | Imports all users from `SYS.DBA_USERS`, without filtering. See [Account import](#account-import). |
-| Service account rights | The required rights (including `GRANT ANY ROLE`/`GRANT ANY PRIVILEGE` for delete) must be agreed with the database administrator. See [Requirements](#requirements). |
+| Part | Script / file | Review |
+| ---- | ------------- | ------ |
+| Revoke all remaining grants before `DROP USER` | `delete.ps1` | Instead of only dropping the user, delete first revokes every remaining role and system privilege, including grants made outside HelloID, and only drops the user when all revokes succeeded. This requires extra rights (`GRANT ANY ROLE`/`GRANT ANY PRIVILEGE`). Confirm with the database administrator that this is desired. See [Delete behavior](#delete-behavior). |
+| Account import without filtering | `import.ps1` | All users from `SYS.DBA_USERS` are imported, including Oracle-maintained and application schemas. Other implementations may need a `WHERE` clause. See [Account import](#account-import). |
+| Username convention, tablespaces and profile | `fieldMapping.json` | The uppercase Active Directory `sAMAccountName`, `USERS`, `TEMP` and `DEFAULT` were chosen for one implementation. Confirm the values with the customer and the database administrator. See [Field mapping](#field-mapping). |
 
 ### Combination with the Key2Belastingen connector
 
@@ -190,9 +187,9 @@ The following parts are known to be implementation-specific and must be reviewed
 
 `import.ps1` imports **all** users from `SYS.DBA_USERS`, without filtering; this includes Oracle-maintained schemas (such as `SYS` and `SYSTEM`) and application schemas. The imported fields are the import fields of the field mapping (`PASSWORD` excluded); an account is imported as enabled when `ACCOUNT_STATUS` is `OPEN`.
 
-| :memo: Note |
+| :warning: Fit For Purpose (FFP) |
 |:---|
-| If only Key2 Belastingen users must be imported, add a `WHERE` clause to the query in `import.ps1` during implementation, for example on a username convention or `ORACLE_MAINTAINED = 'N'` (Oracle 12c and later). |
+| Importing all users without filtering was chosen for one implementation, see [Fit For Purpose (FFP)](#fit-for-purpose-ffp). If only Key2 Belastingen users must be imported, add a `WHERE` clause to the query in `import.ps1` during implementation, for example on a username convention or `ORACLE_MAINTAINED = 'N'` (Oracle 12c and later). |
 
 ### Delete behavior
 
@@ -204,9 +201,9 @@ HelloID revokes its managed permissions before delete. Delete then determines it
 
 When a revoke fails, the action stops and `DROP USER` is not executed. Object privileges are not revoked separately; `DROP USER` removes them. When the user does not exist, delete is skipped.
 
-| :warning: Warning |
+| :warning: Fit For Purpose (FFP) |
 |:---|
-| Delete also revokes roles and system privileges that were granted **outside HelloID**. This is intended: the user is dropped afterwards. |
+| Delete also revokes roles and system privileges that were granted **outside HelloID**, and only drops the user when all revokes succeeded. This was built for the specific requirements of one implementation; confirm with the database administrator that this is desired, or reduce `delete.ps1` to only `DROP USER`. See [Fit For Purpose (FFP)](#fit-for-purpose-ffp). |
 
 ### Governance reconciliation resolutions
 

@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Added
 
-- Marked as Fit For Purpose (FFP): the connector was built for the specific requirements of one implementation. The README contains an FFP warning and a section listing the implementation-specific parts, and every script contains a `FIT FOR PURPOSE (FFP)` header block.
+- Marked the Fit For Purpose (FFP) parts, built for the specific requirements of one implementation: revoking all remaining roles and system privileges before `DROP USER` on delete, and the account import without filtering. The README contains an FFP warning and a section listing these parts, and the scripts concerned contain a `FIT FOR PURPOSE (FFP)` note in their header and at the code.
 - GitHub workflows to verify the changelog and create a release.
 - Full rebuild of the connector to the current HelloID PowerShell V2 script structure (`$actionContext`/`$outputContext`, action messages, audit logs, DryRun support).
 - `update.ps1` and `delete.ps1` (both missing from the original connector).

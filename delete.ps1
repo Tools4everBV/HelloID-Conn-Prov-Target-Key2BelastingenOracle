@@ -2,10 +2,11 @@
 # HelloID-Conn-Prov-Target-Key2BelastingenOracle-Delete
 # PowerShell V2
 #
-# FIT FOR PURPOSE (FFP)
-# This connector is Fit For Purpose: it was built for the specific requirements of one implementation.
-# It is not a fully generic connector and may not fit the next implementation without changes.
-# Review this script against the requirements of each implementation. See README.md, section "Fit For Purpose (FFP)".
+# FIT FOR PURPOSE (FFP): revoke all remaining roles and system privileges before DROP USER
+# Instead of only dropping the user, delete first revokes every remaining role and system privilege, including grants
+# made outside HelloID, and only drops the user when all revokes succeeded. This was built for one implementation and
+# requires extra rights (GRANT ANY ROLE/GRANT ANY PRIVILEGE). Confirm with the database administrator that this is desired.
+# See README.md, section "Fit For Purpose (FFP)".
 #################################################
 
 # Enable TLS1.2
@@ -146,6 +147,7 @@ try {
         $outputContext.PreviousData = ($correlatedAccount | Select-Object -Property $outputFields | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
         $outputContext.Data = [PSCustomObject]@{}
 
+        # FIT FOR PURPOSE (FFP): revoking all remaining grants before DROP USER was built for one implementation; see the header.
         # HelloID revokes its managed permissions before delete. Delete clears all remaining roles and system privileges,
         # including grants made outside HelloID, before DROP USER. This requires ADMIN OPTION (or GRANT ANY ROLE/GRANT ANY PRIVILEGE)
         # for every role and system privilege the user can have; if a REVOKE fails, DROP USER is not executed.

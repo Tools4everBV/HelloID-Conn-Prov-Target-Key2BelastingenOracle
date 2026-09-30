@@ -1,11 +1,6 @@
 #################################################
 # HelloID-Conn-Prov-Target-Key2BelastingenOracle-Update
 # PowerShell V2
-#
-# FIT FOR PURPOSE (FFP)
-# This connector is Fit For Purpose: it was built for the specific requirements of one implementation.
-# It is not a fully generic connector and may not fit the next implementation without changes.
-# Review this script against the requirements of each implementation. See README.md, section "Fit For Purpose (FFP)".
 #################################################
 
 # Enable TLS1.2
